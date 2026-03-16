@@ -1,0 +1,330 @@
+#!/bin/sh
+
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+# !! WINDOWS USERS / Windowsユーザーへの注意
+# !!
+# !! Windowsで編集した場合、改行コードがCRLFに変換されスクリプトが
+# !! 動作しなくなります。編集後に以下のコマンドを実行してください。
+# !!
+# !! If you edit this file on Windows, your editor may silently
+# !! convert line endings to CRLF, which will break this script.
+# !! After editing, run:
+# !!   dos2unix ~/.githooks/pre-push
+# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+
+# ===============================
+# 色設定 (ANSIカラーコード)
+# stdoutがターミナルでない場合 (CIやパイプ経由など) はカラーを無効化する
+#
+# Color settings (ANSI color codes)
+# Disable colors when stdout is not a TTY (e.g. CI pipelines, redirected output)
+# ===============================
+if [ -t 1 ]; then
+  GREEN="\033[0;32m"
+  RED="\033[0;31m"
+  YELLOW="\033[1;33m"
+  GRAY="\033[0;90m"
+  NC="\033[0m"
+else
+  GREEN=""
+  RED=""
+  YELLOW=""
+  GRAY=""
+  NC=""
+fi
+
+# ===============================
+# Xdebugを無効化する
+# Xdebugはステップデバッグ・カバレッジ・プロファイリングに使用するが
+# Lintチェックには不要なため無効化してパフォーマンスを向上させる
+#
+# Disable Xdebug for all child processes
+# Xdebug is only needed for step debugging, coverage, and profiling
+# None of which apply here - disabling it speeds up all lint tools
+# ===============================
+XDEBUG_MODE=off
+export XDEBUG_MODE
+
+# ===============================
+# Gitリポジトリ確認
+# .git が存在しない場合は即座に終了する
+#
+# Git repository check
+# Exit immediately if not inside a Git repository
+# ===============================
+if ! git rev-parse --git-dir > /dev/null 2>&1; then
+  printf "${RED}[GITHOOK] Not a Git repository. Exiting.${NC}\n"
+  exit 1
+fi
+
+# REPO_ROOT を早めに確定させる
+# Resolve REPO_ROOT early
+REPO_ROOT=$(git rev-parse --show-toplevel)
+
+# ===============================
+# リモート名とURLを保存する
+# Git calls the hook as: pre-push <remote-name> <remote-url>
+# Store them so we can forward them to the project-level hook later.
+# ===============================
+REMOTE_NAME="$1"
+REMOTE_URL="$2"
+
+# ===============================
+# LINTスキップ確認
+# LINT=0 が設定されている場合、全Lintチェックをスキップしてプロジェクトフックに進む
+#
+# Lint skip check
+# If LINT=0 is set, skip all lint checks but still run the project-level hook
+# ===============================
+if [ "${LINT:-1}" = "0" ]; then
+  printf "${YELLOW}[GITHOOK] ⚠️  Global pre-push lint checks skipped (LINT=0)${NC}\n"
+  LOCAL_HOOK="$REPO_ROOT/.git/hooks/pre-push"
+  if [ -f "$LOCAL_HOOK" ]; then
+    printf "${YELLOW}[GITHOOK] Running project-level pre-push hook${NC}\n"
+    "$LOCAL_HOOK" "$REMOTE_NAME" "$REMOTE_URL" || exit 1
+  fi
+  exit 0
+fi
+
+# ===============================
+# プッシュ対象のコミット範囲を stdin から取得する
+#
+# Git passes push info via stdin: <local-ref> <local-sha> <remote-ref> <remote-sha>
+# We collect the remote SHAs to build the diff range.
+# If the remote branch does not yet exist (new branch push), diff against the merge-base
+# with the default branch, falling back to all committed files.
+# ===============================
+ZERO="0000000000000000000000000000000000000000"
+RANGE_FROM=""
+RANGE_TO=""
+RANGE_LABEL=""
+while IFS=" " read -r LOCAL_REF LOCAL_SHA REMOTE_REF REMOTE_SHA; do
+  # 削除プッシュ (ローカルSHAがゼロ) はスキップする
+  # Skip branch deletions (local SHA is all zeros)
+  if [ "$LOCAL_SHA" = "$ZERO" ]; then
+    continue
+  fi
+
+  if [ "$REMOTE_SHA" = "$ZERO" ]; then
+    # 新しいブランチ: origin/HEAD とのmerge-baseから現在のHEADまでをdiffする
+    # origin/HEAD が未設定の場合は全ファイルにフォールバックする
+    # New branch: diff from merge-base with origin/HEAD up to HEAD
+    # If origin/HEAD is not set, fall back to all files
+    DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's|refs/remotes/origin/||')
+    if [ -n "$DEFAULT_BRANCH" ]; then
+      BASE=$(git merge-base "$LOCAL_SHA" "origin/$DEFAULT_BRANCH" 2>/dev/null || true)
+      if [ -n "$BASE" ]; then
+        RANGE_FROM="$BASE"
+        RANGE_TO="$LOCAL_SHA"
+        RANGE_LABEL="merge-base with origin/$DEFAULT_BRANCH"
+      fi
+    fi
+  else
+    # 既存ブランチ: リモートの現在地からローカルの先頭までをdiffする
+    # Existing branch: diff from remote tip to local tip
+    RANGE_FROM="$REMOTE_SHA"
+    RANGE_TO="$LOCAL_SHA"
+    RANGE_LABEL="remote HEAD"
+  fi
+  # 複数ブランチを一度にプッシュされても最後の範囲だけ使う (通常は1ブランチ)
+  # Use the last range if multiple refs are pushed at once (single-branch is typical)
+done
+
+# ===============================
+# PHPファイル取得
+# デフォルトはコミット済み全ファイル。LINT_NEW=1 の場合はプッシュ対象コミットのみ。
+#
+# Get PHP files
+# LINT_NEW=1 が設定されている場合のみプッシュ対象コミットに絞る
+# デフォルトはコミット済み全ファイルをLintする (安全側に倒す)
+#
+# Only scope to pushed commits when LINT_NEW=1 is set.
+# Default is to lint all committed files (safe by default).
+# ===============================
+cd "$REPO_ROOT" || exit 1
+
+if [ "${LINT_NEW:-0}" = "1" ] && [ -n "$RANGE_FROM" ] && [ -n "$RANGE_TO" ]; then
+  # プッシュ範囲内で追加・変更されたPHPファイルのみ (削除は除く)
+  # Only added/modified PHP files in the push range (no deletions)
+  PHP_FILES=$(git -c core.quotePath=false diff --name-only --diff-filter=ACM "$RANGE_FROM" "$RANGE_TO" -- '*.php' 2>/dev/null || true)
+  SHORT_FROM=$(git rev-parse --short "$RANGE_FROM")
+  SHORT_TO=$(git rev-parse --short "$RANGE_TO")
+  printf "${YELLOW}[GITHOOK] Running pre-push checks (from %s: %s..%s)${NC}\n\n" "$RANGE_LABEL" "$SHORT_FROM" "$SHORT_TO"
+elif [ "${LINT_NEW:-0}" = "1" ]; then
+  # LINT_NEW=1 だが範囲を検出できなかった場合はフォールバック
+  # LINT_NEW=1 but range could not be determined — fall back to all committed files (staged but uncommitted files are also included as an edge case)
+  PHP_FILES=$(git -c core.quotePath=false ls-files '*.php')
+  printf "${YELLOW}[GITHOOK] Could not determine push range. Lint checking all committed files.${NC}\n\n"
+else
+  # デフォルト: コミット済み全PHPファイル (ステージング済み未コミットファイルも含まれる)
+  # Default: all committed PHP files (staged but uncommitted files are also included as an edge case)
+  PHP_FILES=$(git -c core.quotePath=false ls-files '*.php')
+  printf "${YELLOW}[GITHOOK] Running pre-push checks (all committed files)${NC}\n\n"
+fi
+
+# PHPファイルが存在しない場合はLintをスキップしてプロジェクトフックに進む
+# No PHP files found - skip lint but still run the project-level hook
+if [ -z "$PHP_FILES" ]; then
+  printf "${YELLOW}[GITHOOK] No PHP files found. Skipping checks.${NC}\n"
+  LOCAL_HOOK="$REPO_ROOT/.git/hooks/pre-push"
+  if [ -f "$LOCAL_HOOK" ]; then
+    printf "${YELLOW}[GITHOOK] Running project-level pre-push hook${NC}\n"
+    "$LOCAL_HOOK" "$REMOTE_NAME" "$REMOTE_URL" || exit 1
+  fi
+  exit 0
+fi
+
+# ===============================
+# いずれかのツールが失敗した場合に1をセットし、最後にプッシュを中断するために使用する
+# Set to 1 if any tool fails - used at the end to abort the push
+# ===============================
+FAILED=0
+
+# ===============================
+# 結果表示用関数
+# ツール名・キャプチャ済み出力・終了コードを受け取り3状態で表示する
+#
+# Display result function
+# Takes name, captured output, and exit code - handles all display logic
+# Always called without a pipe so FAILED=1 is visible to the parent script
+# ===============================
+display_result() {
+  NAME=$1
+  OUTPUT=$2
+  EXIT=$3
+
+  if [ "$EXIT" -eq 0 ]; then
+    printf "${GREEN}→ %-30s ✔${NC}\n" "$NAME"
+  else
+    printf "${RED}→ %-30s ✗${NC}\n" "$NAME"
+    printf "%s\n" "$OUTPUT"
+    printf "${RED}  ↳ ${NAME} failed${NC}\n"
+    FAILED=1
+  fi
+}
+
+# ===============================
+# コマンド実行用関数
+# パイプ不要なツール向け (PHPStanなど引数のみで動作するツール)
+#
+# Run function
+# Used for tools that take simple arguments with no piping needed e.g. PHPStan
+# ===============================
+run() {
+  NAME=$1
+  shift
+  OUTPUT=$("$@" 2>&1)
+  display_result "$NAME" "$OUTPUT" $?
+}
+
+# ===============================
+# Laravel Pint
+#
+# Laravelが自動生成するディレクトリを除外する
+# PHPCSとPHPStanはそれぞれの設定ファイルで除外を管理しているため、ここでは除外しない
+#
+# Filter out Laravel auto-generated directories for Pint only.
+# PHPCS and PHPStan manage their own exclusions via their config files (phpcs.xml / phpstan.neon)
+# ===============================
+if [ -f vendor/bin/pint ]; then
+  # LC_ALL=C grep -v '[^ -~]' で非ASCIIファイル名 (日本語ファイル名など) を除外する — Pintが読めないため
+  # LC_ALL=C grep -v '[^ -~]' strips non-ASCII filenames (e.g. Japanese) that Pint cannot read
+  PINT_FILES=$(printf '%s\n' "$PHP_FILES" \
+    | grep -v '^database/migrations/' \
+    | grep -v '^public/' \
+    | grep -v '^storage/' \
+    | grep -v '^resources/lang/' \
+    | LC_ALL=C grep -v '[^ -~]' \
+    || true)
+
+  if [ -z "$PINT_FILES" ]; then
+    printf "${GRAY}→ %-30s -  (no applicable files)${NC}\n" "Laravel Pint"
+  else
+    # プッシュ対象ファイルを positional parameters に展開して渡す (xargs不使用)
+    # Expand pushed files into positional parameters without xargs
+    # IFS= read -r はmacOS/Windows(Git Bash)両対応のPOSIX準拠の読み込み方法
+    # IFS= read -r is POSIX-compliant and works on macOS and Windows (Git Bash)
+    set --
+    while IFS= read -r _f; do
+      [ -n "$_f" ] && set -- "$@" "$_f"
+    done <<PINT_EOF
+$PINT_FILES
+PINT_EOF
+    # --test: ファイルを書き換えず、修正が必要な箇所があれば非ゼロで終了する
+    PINT_OUT=$(vendor/bin/pint --test --ansi "$@" 2>&1)
+    display_result "Laravel Pint" "$PINT_OUT" $?
+  fi
+else
+  printf "${GRAY}→ %-30s -  (not installed)${NC}\n" "Laravel Pint"
+fi
+
+# ===============================
+# PHP_CodeSniffer
+#
+# コーディング規約違反を検出する (phpcs.xml の設定を使用)
+# Pintと異なり、自動修正は行わず違反箇所を報告するだけ
+#
+# Detects coding standard violations using rules defined in phpcs.xml.
+# Unlike Pint, PHPCS only reports violations - it does not auto-fix them.
+# ===============================
+if [ -f vendor/bin/phpcs ]; then
+  # プッシュ対象ファイルを positional parameters に展開して渡す (xargs不使用)
+  # Expand pushed files into positional parameters without xargs
+  set --
+  while IFS= read -r _f; do
+    [ -n "$_f" ] && set -- "$@" "$_f"
+  done <<PHPCS_EOF
+$PHP_FILES
+PHPCS_EOF
+  PHPCS_OUT=$(vendor/bin/phpcs --colors "$@" 2>&1)
+  display_result "PHP_CodeSniffer" "$PHPCS_OUT" $?
+else
+  printf "${GRAY}→ %-30s -  (not installed)${NC}\n" "PHP_CodeSniffer"
+fi
+
+# ===============================
+# PHPStan / Larastan
+#
+# LarastanはPHPStanのLaravel向け拡張機能で、同じバイナリ (vendor/bin/phpstan) を使用する
+# 型情報・依存関係グラフの解決に全体コンテキストが必要なため、常にプロジェクト全体を解析する
+#
+# Larastan is a Laravel-specific PHPStan extension - both share the same binary (vendor/bin/phpstan).
+# Always analyses the full project because resolving types and the dependency graph
+# requires complete project context.
+# ===============================
+if [ -f vendor/bin/phpstan ]; then
+  run "PHPStan / Larastan" vendor/bin/phpstan analyse --ansi
+else
+  printf "${GRAY}→ %-30s -  (not installed)${NC}\n" "PHPStan / Larastan"
+fi
+
+# ===============================
+# 結果判定
+# いずれかのツールが失敗していた場合はここでプッシュを中断する
+#
+# Final result
+# Abort the push if any tool reported a failure
+# ===============================
+if [ "$FAILED" -ne 0 ]; then
+  printf "\n"
+  printf "${RED}✖ Pre-push checks failed${NC}\n"
+  exit 1
+fi
+
+printf "\n"
+printf "${GREEN}✔ All checks passed${NC}\n"
+
+# ===============================
+# プロジェクト固有のフック呼び出し
+# core.hooksPath を設定すると Git は .git/hooks/ を完全に無視する
+#
+# Project-level hook chaining
+# Setting core.hooksPath causes Git to ignore .git/hooks/ entirely
+# If the project has its own pre-push hook, run it here so nothing is lost
+# ===============================
+LOCAL_HOOK="$REPO_ROOT/.git/hooks/pre-push"
+if [ -f "$LOCAL_HOOK" ]; then
+  printf "\n"
+  printf "${YELLOW}[GITHOOK] Running project-level pre-push hook${NC}\n"
+  "$LOCAL_HOOK" "$REMOTE_NAME" "$REMOTE_URL" || exit 1
+fi

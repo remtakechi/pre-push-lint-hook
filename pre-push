@@ -240,13 +240,18 @@ EXCL_EOF
     done <<PINT_EOF
 $PHP_FILES
 PINT_EOF
-    PINT_OUT=$(vendor/bin/pint --test --ansi "$@" 2>&1)
+    if [ "$#" -eq 0 ]; then
+      printf "${GRAY}→ %-30s -  (no applicable files)${NC}\n" "Laravel Pint"
+    else
+      PINT_OUT=$(vendor/bin/pint --test --ansi "$@" 2>&1)
+      display_result "Laravel Pint" "$PINT_OUT" $?
+    fi
   else
     # デフォルト: ファイルを渡さずPint自身のconfig (pint.json) に従ってファイルを探索させる
     # Default: no file args — identical to running `vendor/bin/pint --test` directly in the project
     PINT_OUT=$(vendor/bin/pint --test --ansi 2>&1)
+    display_result "Laravel Pint" "$PINT_OUT" $?
   fi
-  display_result "Laravel Pint" "$PINT_OUT" $?
 else
   printf "${GRAY}→ %-30s -  (not installed)${NC}\n" "Laravel Pint"
 fi

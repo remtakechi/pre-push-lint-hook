@@ -22,9 +22,6 @@ Global Git hook for PHP/Laravel projects — a `pre-push` hook.
 
 インストールされていないツールは自動的にスキップされます。
 
-> **Laravel Pint — 除外について**
-> デフォルトモードではPintが `pint.json` の設定をそのまま使用するため、除外設定はすべて `pint.json` で管理してください。
-
 ### インストール
 
 **Step 1 — フックファイルを移動する**
@@ -127,6 +124,9 @@ LINT=0 git push
 ```sh
 LINT_NEW=1 git push
 ```
+
+> **Laravel Pint の制限事項**
+> `LINT_NEW=1` でファイルを明示指定すると、Pintは `pint.json` の `exclude` のみスクリプト側で手動フィルタリングします。`notPath` / `notName` は除外されません。これらを使用している場合は `LINT_NEW=1` を使わずデフォルトモードで実行してください。
 
 ### アンインストール
 
@@ -272,6 +272,9 @@ If the push range cannot be determined, or no PHP files changed, it falls back t
 ```sh
 LINT_NEW=1 git push
 ```
+
+> **Laravel Pint limitation**
+> When `LINT_NEW=1` is active and files are passed explicitly, only `exclude` from `pint.json` is manually filtered by the script. `notPath` and `notName` are not applied. If your project uses those, run without `LINT_NEW=1`.
 
 ### Uninstall
 

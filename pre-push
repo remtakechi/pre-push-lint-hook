@@ -5,6 +5,7 @@
 # !!
 # !! Windowsで編集した場合、改行コードがCRLFに変換されスクリプトが
 # !! 動作しなくなります。編集後に以下のコマンドを実行してください。
+# !!   dos2unix ~/.githooks/pre-push
 # !!
 # !! If you edit this file on Windows, your editor may silently
 # !! convert line endings to CRLF, which will break this script.

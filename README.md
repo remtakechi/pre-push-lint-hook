@@ -60,13 +60,13 @@ git config --global core.hooksPath
 ls -la "$HOME/.githooks/"
 ```
 
-### 手動テスト
+### テストコマンド
 
 ```sh
 # pre-push のLintチェックだけを実行する — 実際にはプッシュしない
-# 現在のブランチのプッシュ前コミットを再現します。コミットが1つ以上必要です。
+# 現在のブランチで、プッシュ前のコミットでpre-pushのLintチェックをテストできます。ブランチにコミットが1つ以上必要です。
 # Runs only the lint checks — no actual push happens
-# Simulates the commits that would be pushed. Requires at least one commit.
+# Simulates the pre-push lint check on the current branch for commits that arent pushed. Requires at least one commit.
 BRANCH=$(git branch --show-current)
 REMOTE_SHA=$(git rev-parse --verify "origin/$BRANCH" 2>/dev/null || echo 0000000000000000000000000000000000000000)
 echo "refs/heads/$BRANCH $(git rev-parse HEAD) refs/heads/$BRANCH $REMOTE_SHA" | "$HOME/.githooks/pre-push" origin x
@@ -140,7 +140,7 @@ git config --global --unset core.hooksPath
 | 環境 | サポート状況 |
 |---|---|
 | macOS | ✅ 動作確認済み |
-| WSL / WSL2 | 🔵 理論上動作するはず (Linux環境として動作するため・未検証) |
+| WSL / WSL2 | 🔵 理論上動作可能 (未検証) |
 | ネイティブWindows (Git Bash) | ⚠️ 未検証。CMDおよびPowerShellは非対応 |
 
 > **ネイティブWindowsユーザーへの注意**

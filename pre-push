@@ -168,8 +168,11 @@ fi
 # ===============================
 # いずれかのツールが失敗した場合に1をセットし、最後にプッシュを中断するために使用する
 # Set to 1 if any tool fails - used at the end to abort the push
+# 1つ以上のツールが実行された場合に1をセットする
+# Set to 1 if at least one tool actually ran (not just skipped)
 # ===============================
 FAILED=0
+RAN=0
 
 # ===============================
 # 結果表示用関数
@@ -184,6 +187,7 @@ display_result() {
   OUTPUT=$2
   EXIT=$3
 
+  RAN=1
   if [ "$EXIT" -eq 0 ]; then
     printf "${GREEN}→ %-30s ✔${NC}\n" "$NAME"
   else
@@ -315,7 +319,11 @@ if [ "$FAILED" -ne 0 ]; then
 fi
 
 printf "\n"
-printf "${GREEN}✔ All checks passed${NC}\n"
+if [ "$RAN" -eq 0 ]; then
+  printf "${GRAY}✔ All checks skipped (no tools installed)${NC}\n"
+else
+  printf "${GREEN}✔ All checks passed${NC}\n"
+fi
 
 # ===============================
 # プロジェクト固有のフック呼び出し

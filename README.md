@@ -10,22 +10,20 @@ Global Git hook for PHP/Laravel projects — a `pre-push` hook.
 
 | フック | タイミング | 対象ファイル |
 |---|---|---|
-| `pre-push` | プッシュ直前 | デフォルトはコミット済み全PHPファイル (`LINT_NEW=1` でプッシュ対象コミットのみに絞れる) |
+| `pre-push` | プッシュ直前 | デフォルトは各ツールの設定ファイルに従ってプロジェクト全体 (`LINT_NEW=1` でプッシュ対象コミットのみに絞れる) |
 
 ### 実行されるツール
 
 | ツール | pre-push | プロジェクトにインストール必要？ |
 |---|---|---|
-| Laravel Pint | デフォルトはコミット済み全ファイル (`LINT_NEW=1` でプッシュ対象のみ) | ✅ `vendor/bin/pint` |
-| PHP_CodeSniffer | デフォルトはコミット済み全ファイル (`LINT_NEW=1` でプッシュ対象のみ) | ✅ `vendor/bin/phpcs` |
-| PHPStan / Larastan | 常にプロジェクト全体 | ✅ `vendor/bin/phpstan` |
+| Laravel Pint | デフォルトはプロジェクト全体 (`pint.json` の設定に従う。`LINT_NEW=1` でプッシュ対象のみ) | ✅ `vendor/bin/pint` |
+| PHP_CodeSniffer | デフォルトはプロジェクト全体 (`phpcs.xml` の設定に従う。`LINT_NEW=1` でプッシュ対象のみ) | ✅ `vendor/bin/phpcs` |
+| PHPStan / Larastan | 常にプロジェクト全体 (`phpstan.neon` の設定に従う) | ✅ `vendor/bin/phpstan` |
 
 インストールされていないツールは自動的にスキップされます。
 
 > **Laravel Pint — 除外について**
-> Pintは日本語などの非ASCIIファイル名を読み込めないため自動的に除外されます。
-> `database/migrations/`・`public/`・`storage/`・`resources/lang/` も除外されます。
-> それ以外の除外設定は `pint.json` で管理してください。
+> デフォルトモードではPintが `pint.json` の設定をそのまま使用するため、除外設定はすべて `pint.json` で管理してください。
 
 ### インストール
 
@@ -76,7 +74,7 @@ echo "refs/heads/$BRANCH $(git rev-parse HEAD) refs/heads/$BRANCH $REMOTE_SHA" |
 
 **すべてパス:**
 ```
-[GITHOOK] Running pre-push checks (all committed files)
+[GITHOOK] Running pre-push checks (full project)
 
 → Laravel Pint                 ✔
 → PHP_CodeSniffer              -  (not installed)
@@ -87,7 +85,7 @@ echo "refs/heads/$BRANCH $(git rev-parse HEAD) refs/heads/$BRANCH $REMOTE_SHA" |
 
 **失敗あり:**
 ```
-[GITHOOK] Running pre-push checks (all committed files)
+[GITHOOK] Running pre-push checks (full project)
 
 → Laravel Pint                 ✗
   ... pint errors ...
@@ -119,11 +117,12 @@ LINT=0 git push
 
 ### デフォルトのLint対象
 
-デフォルトではコミット済み全PHPファイルをLintします (ステージング済みの未コミットファイルも含まれますが、通常のワークフローでは問題ありません)。
+デフォルトでは各ツールをファイル指定なしで実行します。各ツールが自身の設定ファイル (`pint.json` / `phpcs.xml` / `phpstan.neon`) に従ってスキャン対象・除外対象を決定します。プロジェクトでそのツールを直接実行した場合と同じ結果になります。
 
 ### プッシュ対象コミットのみLintする
 
 `LINT_NEW=1` を使用するとプッシュするコミットに含まれるファイルのみを対象にします。
+プッシュ範囲を検出できない場合や対象PHPファイルがない場合はデフォルトモード (プロジェクト全体) にフォールバックします。
 
 ```sh
 LINT_NEW=1 git push
@@ -154,22 +153,17 @@ git config --global --unset core.hooksPath
 
 | Hook | When it runs | Files scanned |
 |---|---|---|
-| `pre-push` | Before each push | All committed PHP files by default (`LINT_NEW=1` to scope to pushed commits only) |
+| `pre-push` | Before each push | Full project by default, using each tool's own config (`LINT_NEW=1` to scope to pushed commits only) |
 
 ### What it runs
 
 | Tool | pre-push | Requires install? |
 |---|---|---|
-| Laravel Pint | All committed files by default (`LINT_NEW=1` for pushed commits only) | ✅ `vendor/bin/pint` |
-| PHP_CodeSniffer | All committed files by default (`LINT_NEW=1` for pushed commits only) | ✅ `vendor/bin/phpcs` |
-| PHPStan / Larastan | Full project always | ✅ `vendor/bin/phpstan` |
+| Laravel Pint | Full project by default, respecting `pint.json` (`LINT_NEW=1` for pushed commits only) | ✅ `vendor/bin/pint` |
+| PHP_CodeSniffer | Full project by default, respecting `phpcs.xml` (`LINT_NEW=1` for pushed commits only) | ✅ `vendor/bin/phpcs` |
+| PHPStan / Larastan | Full project always, respecting `phpstan.neon` | ✅ `vendor/bin/phpstan` |
 
 Tools that are not installed are automatically skipped — no errors.
-
-> **Laravel Pint — exclusions**
-> Files with non-ASCII names (e.g. Japanese) are automatically excluded because Pint cannot read them.
-> The directories `database/migrations/`, `public/`, `storage/`, and `resources/lang/` are also excluded.
-> All other exclusions should be managed in `pint.json`.
 
 ### Install
 
@@ -226,7 +220,7 @@ echo "refs/heads/$BRANCH $(git rev-parse HEAD) refs/heads/$BRANCH $REMOTE_SHA" |
 
 **All passing:**
 ```
-[GITHOOK] Running pre-push checks (all committed files)
+[GITHOOK] Running pre-push checks (full project)
 
 → Laravel Pint                 ✔
 → PHP_CodeSniffer              -  (not installed)
@@ -237,7 +231,7 @@ echo "refs/heads/$BRANCH $(git rev-parse HEAD) refs/heads/$BRANCH $REMOTE_SHA" |
 
 **With failures:**
 ```
-[GITHOOK] Running pre-push checks (all committed files)
+[GITHOOK] Running pre-push checks (full project)
 
 → Laravel Pint                 ✗
   ... pint errors ...
@@ -268,11 +262,12 @@ The following warning will be printed:
 
 ### Default lint scope
 
-By default all committed PHP files are linted (staged but uncommitted files are also included as an edge case — normal workflow is unaffected).
+By default each tool is run with no file arguments — identical to running it directly in the project. Each tool uses its own config (`pint.json`, `phpcs.xml`, `phpstan.neon`) to determine what to scan and what to exclude.
 
 ### Lint only pushed commits
 
 Use `LINT_NEW=1` to scope lint checks to only the files in the commits being pushed.
+If the push range cannot be determined, or no PHP files changed, it falls back to default mode (full project).
 
 ```sh
 LINT_NEW=1 git push

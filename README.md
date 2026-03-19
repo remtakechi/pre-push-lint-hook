@@ -1,4 +1,4 @@
-# PHP Git Hooks / PHP Gitフック
+# PHP Lint pre-push Git Hook
 
 Global Git hook for PHP/Laravel projects — a `pre-push` hook.
 
@@ -24,11 +24,11 @@ Global Git hook for PHP/Laravel projects — a `pre-push` hook.
 
 ### インストール
 
-**Step 1 — フックファイルを移動する**
+**Step 1 — Git Clone（※既に.githooksがホームディレクトリに存在する場合、別の場所にCloneして中身だけコピペして下さい！）
+**
 
 ```sh
-mkdir -p "$HOME/.githooks"
-mv /path/to/pre-push "$HOME/.githooks/pre-push"
+git clone https://github.com/remtakechi/pre-push-lint-hook.git "$HOME/.githooks"
 ```
 
 **Step 2 — 実行権限を付与する**
@@ -167,11 +167,10 @@ Tools that are not installed are automatically skipped — no errors.
 
 ### Install
 
-**Step 1 — Move the hook file**
+**Step 1 — Clone the hook file to your home directory(if .githooks already exists, copy only README and pre-push to the dir)**
 
 ```sh
-mkdir -p "$HOME/.githooks"
-mv /path/to/pre-push "$HOME/.githooks/pre-push"
+git clone https://github.com/remtakechi/pre-push-lint-hook.git "$HOME/.githooks"
 ```
 
 **Step 2 — Make it executable**

@@ -283,7 +283,7 @@ PHPCS_EOF
   else
     # デフォルト: ファイルを渡さずPHPCS自身のconfig (phpcs.xml) に従ってファイルを探索させる
     # Default: no file args — identical to running `vendor/bin/phpcs` directly in the project
-    PHPCS_OUT=$(vendor/bin/phpcs --colors 2>&1)
+    PHPCS_OUT=$(vendor/bin/phpcs --colors . 2>&1)
   fi
   display_result "PHP_CodeSniffer" "$PHPCS_OUT" $?
 else

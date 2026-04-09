@@ -142,6 +142,41 @@ done
 # ===============================
 cd "$REPO_ROOT" || exit 1
 
+# ===============================
+# 作業ツリーの未コミットPHP変更チェック
+# 作業ツリーがHEADと異なるPHPファイルを持つ場合、Lintは
+# コミット済み内容ではなくディスク上のファイルを検査してしまう。
+# その状態では「クリーン」に見えてもプッシュされるコミットが
+# Lint違反を含む可能性があるため、コミットまたはスタッシュを促す。
+#
+# Uncommitted PHP working-tree check
+# If the working tree has PHP files that differ from HEAD, lint will
+# check the on-disk content rather than what is actually committed.
+# This can produce a false pass (disk is clean, commit is dirty).
+# Require the user to commit or stash before pushing.
+# ===============================
+DIRTY_PHP=$(git diff --name-only -- '*.php' 2>/dev/null)
+DIRTY_PHP_STAGED=$(git diff --cached --name-only -- '*.php' 2>/dev/null)
+DIRTY_PHP_UNTRACKED=$(git ls-files --others --exclude-standard -- '*.php' 2>/dev/null)
+if [ -n "$DIRTY_PHP" ] || [ -n "$DIRTY_PHP_STAGED" ] || [ -n "$DIRTY_PHP_UNTRACKED" ]; then
+  printf "${RED}[GITHOOK] Uncommitted PHP changes detected.${NC}\n"
+  printf "${RED}          Lint reads files from disk, not from the committed snapshot.${NC}\n"
+  printf "${RED}          Commit or stash your changes before pushing.${NC}\n"
+  if [ -n "$DIRTY_PHP_STAGED" ]; then
+    printf "${YELLOW}  Staged:${NC}\n"
+    printf "%s\n" "$DIRTY_PHP_STAGED" | sed 's/^/    /'
+  fi
+  if [ -n "$DIRTY_PHP" ]; then
+    printf "${YELLOW}  Unstaged:${NC}\n"
+    printf "%s\n" "$DIRTY_PHP" | sed 's/^/    /'
+  fi
+  if [ -n "$DIRTY_PHP_UNTRACKED" ]; then
+    printf "${YELLOW}  Untracked:${NC}\n"
+    printf "%s\n" "$DIRTY_PHP_UNTRACKED" | sed 's/^/    /'
+  fi
+  exit 1
+fi
+
 if [ "${LINT_NEW:-0}" = "1" ] && [ -n "$RANGE_FROM" ] && [ -n "$RANGE_TO" ]; then
   # プッシュ範囲内で追加・変更されたPHPファイルのみ (削除は除く)
   # Only added/modified PHP files in the push range (no deletions)
